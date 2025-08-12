@@ -11,5 +11,5 @@ build
 *.log
 *.DS_Store
 README.md
-sonarrv4-openapi.json
+docs/sonarrv4-openapi.json
 
