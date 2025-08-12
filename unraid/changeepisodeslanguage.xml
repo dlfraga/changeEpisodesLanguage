@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Container version="2">
+  <Name>changeEpisodesLanguage</Name>
+  <Repository>ghcr.io/dlfraga/changeepisodeslanguage:latest</Repository>
+  <Registry>https://github.com/dlfraga/changeEpisodesLanguage/pkgs/container/changeepisodeslanguage</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/dlfraga/changeEpisodesLanguage/issues</Support>
+  <Project>https://github.com/dlfraga/changeEpisodesLanguage</Project>
+  <Overview>Sets MKV default tracks for anime episodes to Japanese audio and English full subtitles by scanning Sonarr, optionally skipping files still seeding in Transmission.</Overview>
+  <Category>Downloaders:Other;MediaApp:Video;Tools:Utilities;</Category>
+  <WebUI></WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/dlfraga/changeEpisodesLanguage/main/unraid/changeepisodeslanguage.xml</TemplateURL>
+  <Icon></Icon>
+  <ExtraParams></ExtraParams>
+  <PostArgs></PostArgs>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateLink/>
+  <Description>Daily job that uses mkvtoolnix to set default audio/subtitle tracks on MKV anime episodes managed by Sonarr. Optional Transmission integration to exclude seeding files.</Description>
+  <Networking>
+    <Mode>bridge</Mode>
+  </Networking>
+  <Data>
+    <Volume>
+      <HostDir>/mnt/user/media</HostDir>
+      <ContainerDir>/path/to/media</ContainerDir>
+      <Mode>rw</Mode>
+    </Volume>
+  </Data>
+  <Environment>
+    <Variable>
+      <Name>SONARR_URL</Name>
+      <Value>http://sonarr:8989</Value>
+      <Mode/>
+      <Description>Base URL of Sonarr (v3 API).</Description>
+      <Display>always</Display>
+      <Required>true</Required>
+      <Mask>false</Mask>
+    </Variable>
+    <Variable>
+      <Name>SONARR_API_KEY</Name>
+      <Value></Value>
+      <Mode/>
+      <Description>Sonarr API key (Settings -&gt; General).</Description>
+      <Display>always</Display>
+      <Required>true</Required>
+      <Mask>true</Mask>
+    </Variable>
+    <Variable>
+      <Name>EXCLUDE_SEEDING</Name>
+      <Value>true</Value>
+      <Mode/>
+      <Description>Exclude files still seeding in Transmission.</Description>
+      <Display>advanced</Display>
+      <Required>false</Required>
+      <Mask>false</Mask>
+    </Variable>
+    <Variable>
+      <Name>TRANSMISSION_RPC_URL</Name>
+      <Value>http://transmission:9091/transmission/rpc</Value>
+      <Mode/>
+      <Description>Transmission RPC endpoint. Required if EXCLUDE_SEEDING=true.</Description>
+      <Display>advanced</Display>
+      <Required>false</Required>
+      <Mask>false</Mask>
+    </Variable>
+    <Variable>
+      <Name>TRANSMISSION_USER</Name>
+      <Value></Value>
+      <Mode/>
+      <Description>Transmission username (optional).</Description>
+      <Display>advanced</Display>
+      <Required>false</Required>
+      <Mask>false</Mask>
+    </Variable>
+    <Variable>
+      <Name>TRANSMISSION_PASSWORD</Name>
+      <Value></Value>
+      <Mode/>
+      <Description>Transmission password (optional).</Description>
+      <Display>advanced</Display>
+      <Required>false</Required>
+      <Mask>true</Mask>
+    </Variable>
+    <Variable>
+      <Name>PATH_MAP_FROM</Name>
+      <Value></Value>
+      <Mode/>
+      <Description>Rewrite prefix for Sonarr -&gt; Transmission path mapping (optional).</Description>
+      <Display>advanced</Display>
+      <Required>false</Required>
+      <Mask>false</Mask>
+    </Variable>
+    <Variable>
+      <Name>PATH_MAP_TO</Name>
+      <Value></Value>
+      <Mode/>
+      <Description>Rewrite prefix target for Sonarr -&gt; Transmission path mapping (optional).</Description>
+      <Display>advanced</Display>
+      <Required>false</Required>
+      <Mask>false</Mask>
+    </Variable>
+    <Variable>
+      <Name>FILE_PATH_MAP_FROM</Name>
+      <Value></Value>
+      <Mode/>
+      <Description>Rewrite prefix for Sonarr -&gt; Container file path mapping (optional).</Description>
+      <Display>advanced</Display>
+      <Required>false</Required>
+      <Mask>false</Mask>
+    </Variable>
+    <Variable>
+      <Name>FILE_PATH_MAP_TO</Name>
+      <Value></Value>
+      <Mode/>
+      <Description>Rewrite prefix target for Sonarr -&gt; Container file path mapping (optional).</Description>
+      <Display>advanced</Display>
+      <Required>false</Required>
+      <Mask>false</Mask>
+    </Variable>
+    <Variable>
+      <Name>POLL_INTERVAL_HOURS</Name>
+      <Value>24</Value>
+      <Mode/>
+      <Description>Polling interval in hours (default 24).</Description>
+      <Display>advanced</Display>
+      <Required>false</Required>
+      <Mask>false</Mask>
+    </Variable>
+    <Variable>
+      <Name>RUN_ONCE</Name>
+      <Value>false</Value>
+      <Mode/>
+      <Description>If true, run a single scan and exit.</Description>
+      <Display>advanced</Display>
+      <Required>false</Required>
+      <Mask>false</Mask>
+    </Variable>
+    <Variable>
+      <Name>DRY_RUN</Name>
+      <Value>false</Value>
+      <Mode/>
+      <Description>If true, log planned changes without modifying files.</Description>
+      <Display>advanced</Display>
+      <Required>false</Required>
+      <Mask>false</Mask>
+    </Variable>
+  </Environment>
+  <Labels/>
+  <Config>
+    <Name>Media</Name>
+    <Target>/path/to/media</Target>
+    <Default>PATH: /mnt/user/media</Default>
+    <Description>Map to your media root so the container can read and edit MKV files.</Description>
+    <Type>Path</Type>
+    <Mode>rw</Mode>
+    <Display>always</Display>
+    <Required>true</Required>
+    <Mask>false</Mask>
+  </Config>
+</Container>
+
+
