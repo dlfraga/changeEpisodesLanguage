@@ -1,6 +1,6 @@
-### changeAnimeLanguage
+### changeEpisodesLanguage
 
-Small service that scans Sonarr anime episode files and sets default tracks to Japanese audio and English full subtitles. Optionally skips files that are still seeding in Transmission.
+Small service that scans Sonarr anime episode files and sets default tracks, prioritizing Japanese audio and English full subtitles. Optionally skips files that are still seeding in Transmission.
 
 ### How it works
 
@@ -8,8 +8,8 @@ Small service that scans Sonarr anime episode files and sets default tracks to J
 - Calls Sonarr `/api/v3/episode?seriesId=...&includeEpisodeFile=true` to list episodes and file paths.
 - Optionally queries Transmission RPC for torrents in seed-wait/seeding and excludes their files.
 - For each `.mkv` file, inspects tracks with `mkvmerge -J` and sets flags via `mkvpropedit`:
-  - Default audio: Japanese
-  - Default subs: English full (avoids "signs/songs" where possible)
+  - Default audio: Japanese when available (for every episode that has it)
+  - Default subs: always enabled; prefer English full (avoids "signs/songs" where possible), else English, else any
 
 ### Configuration (env vars)
 
@@ -57,7 +57,7 @@ Make sure the container can access your media paths and has `mkvtoolnix` availab
 
 - Only `.mkv` files are changed.
 - Transmission seeding detection uses status codes 5 (seed-wait) and 6 (seeding).
-- The script resets default/forced flags for all audio/sub tracks before setting the desired defaults.
+- Audio default is only reset when switching to Japanese; subtitles defaults are always normalized so one is active.
 - Logs to stdout; suitable for Unraid Docker templates.
 
 

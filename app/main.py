@@ -132,6 +132,9 @@ class TransmissionClient:
 class TrackSelection:
     audio_track_index: Optional[int]
     subtitle_track_index: Optional[int]
+    should_change_audio: bool
+    audio_language_code: Optional[str]
+    subtitle_language_code: Optional[str]
 
 
 class MkvTool:
@@ -175,64 +178,91 @@ class MkvTool:
             elif t.get("type") == "subtitles":
                 sub_tracks.append((t.get("id"), t))
 
-        # Choose Japanese audio
-        audio_idx = None
+        # Identify Japanese audio track
+        japanese_audio_id: Optional[int] = None
         for tid, t in audio_tracks:
             lang = self._lang_code((t.get("properties") or {}).get("language"))
             name = (t.get("properties") or {}).get("track_name")
             if lang == "jpn" or (name and re.search(r"jap|jpn|japanese", name, re.IGNORECASE)):
-                audio_idx = tid
+                japanese_audio_id = tid
                 break
-        if audio_idx is None and audio_tracks:
-            # fallback: first audio
-            audio_idx = audio_tracks[0][0]
 
-        # Choose English full subtitles
+        # Identify English subtitle tracks
         english_subs: List[Tuple[int, Dict]] = []
         for tid, t in sub_tracks:
             lang = self._lang_code((t.get("properties") or {}).get("language"))
             if lang == "eng":
                 english_subs.append((tid, t))
 
-        chosen_sub_idx = None
-        if english_subs:
-            # Prefer those not marked as signs/songs
-            full_first = [
-                (tid, t)
-                for tid, t in english_subs
-                if not self._is_signs_track((t.get("properties") or {}).get("track_name"))
-            ]
-            if full_first:
-                # Prefer names containing Full/Dialogue/SDH
-                prioritized = sorted(
-                    full_first,
-                    key=lambda x: 0
-                    if re.search(r"full|dialogue|sdh", ((x[1].get("properties") or {}).get("track_name") or ""), re.IGNORECASE)
-                    else 1,
-                )
-                chosen_sub_idx = prioritized[0][0]
-            else:
-                # If all are signs tracks, pick the first but we'll still mark it as default
-                chosen_sub_idx = english_subs[0][0]
+        english_full: List[Tuple[int, Dict]] = [
+            (tid, t) for tid, t in english_subs if not self._is_signs_track((t.get("properties") or {}).get("track_name"))
+        ]
+        # Prioritize Full/Dialogue/SDH
+        english_full_sorted = sorted(
+            english_full,
+            key=lambda x: 0
+            if re.search(r"full|dialogue|sdh", ((x[1].get("properties") or {}).get("track_name") or ""), re.IGNORECASE)
+            else 1,
+        )
 
-        return TrackSelection(audio_track_index=audio_idx, subtitle_track_index=chosen_sub_idx)
+        english_full_id: Optional[int] = english_full_sorted[0][0] if english_full_sorted else None
+        english_any_id: Optional[int] = english_subs[0][0] if english_subs else None
+        any_sub_id: Optional[int] = sub_tracks[0][0] if sub_tracks else None
+
+        # Decision logic per updated requirements:
+        # - Always change audio default to Japanese when available
+        # - Always enable a default subtitle track (prefer EN Full -> EN -> any)
+        chosen_sub_idx = english_full_id or english_any_id or any_sub_id
+        chosen_sub_lang = "eng" if (english_full_id or english_any_id) else None
+
+        if japanese_audio_id is not None:
+            return TrackSelection(
+                audio_track_index=japanese_audio_id,
+                subtitle_track_index=chosen_sub_idx,
+                should_change_audio=True,
+                audio_language_code="jpn",
+                subtitle_language_code=chosen_sub_lang,
+            )
+
+        # No Japanese audio: don't change audio, but still enforce subtitle default
+        return TrackSelection(
+            audio_track_index=None,
+            subtitle_track_index=chosen_sub_idx,
+            should_change_audio=False,
+            audio_language_code=None,
+            subtitle_language_code=chosen_sub_lang,
+        )
 
     def apply_flags(self, file_path: str, inspect: Dict, selection: TrackSelection) -> None:
         commands: List[List[str]] = []
-        # Reset all defaults to 0 first
+
+        # Reset defaults only for the types we will change
+        if selection.should_change_audio:
+            for t in inspect.get("tracks", []):
+                if t.get("type") == "audio":
+                    tid = t.get("id")
+                    commands.append(["mkvpropedit", file_path, "--edit", f"track:{tid}", "--set", "flag-default=0", "--set", "flag-forced=0"])
+
+        # We always manage subtitles default
         for t in inspect.get("tracks", []):
-            tid = t.get("id")
-            ttype = t.get("type")
-            if ttype in {"audio", "subtitles"}:
+            if t.get("type") == "subtitles":
+                tid = t.get("id")
                 commands.append(["mkvpropedit", file_path, "--edit", f"track:{tid}", "--set", "flag-default=0", "--set", "flag-forced=0"])
 
-        # Set audio
-        if selection.audio_track_index is not None:
-            commands.append(["mkvpropedit", file_path, "--edit", f"track:{selection.audio_track_index}", "--set", "flag-default=1", "--set", "language=jpn"])
+        # Set audio default if requested
+        if selection.should_change_audio and selection.audio_track_index is not None:
+            cmd = ["mkvpropedit", file_path, "--edit", f"track:{selection.audio_track_index}", "--set", "flag-default=1"]
+            if selection.audio_language_code:
+                cmd += ["--set", f"language={selection.audio_language_code}"]
+            commands.append(cmd)
 
-        # Set subtitles
+        # Set subtitle default (always enable some subtitle track)
         if selection.subtitle_track_index is not None:
-            commands.append(["mkvpropedit", file_path, "--edit", f"track:{selection.subtitle_track_index}", "--set", "flag-default=1", "--set", "flag-forced=0", "--set", "language=eng"])
+            cmd = ["mkvpropedit", file_path, "--edit", f"track:{selection.subtitle_track_index}", "--set", "flag-default=1"]
+            # Leave forced=0 by default; can be made configurable later
+            if selection.subtitle_language_code:
+                cmd += ["--set", f"language={selection.subtitle_language_code}"]
+            commands.append(cmd)
 
         for cmd in commands:
             logging.info("Running: %s", " ".join(cmd))
@@ -364,7 +394,10 @@ def process_once() -> None:
                     continue
                 mkv.apply_flags(effective_path, inspect, selection)
                 files_modified += 1
-                logging.info("Updated flags: %s", effective_path)
+                if selection.should_change_audio:
+                    logging.info("Set default audio to Japanese and ensured subtitles default: %s", effective_path)
+                else:
+                    logging.info("Ensured subtitles default is set (no Japanese audio track present): %s", effective_path)
             except subprocess.CalledProcessError as e:
                 errors += 1
                 logging.warning("Command failed for %s: %s", effective_path, e)
