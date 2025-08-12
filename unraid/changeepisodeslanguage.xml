@@ -4,8 +4,7 @@
   <Repository>ghcr.io/dlfraga/changeepisodeslanguage:latest</Repository>
   <Registry>https://github.com/dlfraga/changeEpisodesLanguage/pkgs/container/changeepisodeslanguage</Registry>
   <Network>bridge</Network>
-  <MyIP/>
-  <Shell>bash</Shell>
+  
   <Privileged>false</Privileged>
   <Support>https://github.com/dlfraga/changeEpisodesLanguage/issues</Support>
   <Project>https://github.com/dlfraga/changeEpisodesLanguage</Project>
@@ -14,11 +13,7 @@
   <WebUI></WebUI>
   <TemplateURL>https://raw.githubusercontent.com/dlfraga/changeEpisodesLanguage/main/unraid/changeepisodeslanguage.xml</TemplateURL>
   <Icon></Icon>
-  <ExtraParams></ExtraParams>
-  <PostArgs></PostArgs>
-  <CPUset/>
-  <DateInstalled/>
-  <DonateLink/>
+  
   <Labels/>
   <!-- Paths -->
   <Config Name="Media" Target="/path/to/media" Default="/mnt/user/media" Description="Map to your media root so the container can read and edit MKV files." Type="Path" Display="always" Required="true" Mask="false">rw</Config>
