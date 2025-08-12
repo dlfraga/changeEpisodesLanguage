@@ -28,15 +28,15 @@ Small service that scans Sonarr anime episode files and sets default tracks to J
 Build:
 
 ```bash
-docker build -t change-anime-language .
+docker build -t ghcr.io/dlfraga/changeepisodeslanguage:dev .
 ```
 
 Run (compose example):
 
 ```yaml
 services:
-  change-anime-language:
-    image: change-anime-language:latest
+  change-episodes-language:
+    image: ghcr.io/dlfraga/changeepisodeslanguage:latest
     environment:
       - SONARR_URL=http://sonarr:8989
       - SONARR_API_KEY=YOUR_KEY
