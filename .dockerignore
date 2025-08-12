@@ -1,0 +1,15 @@
+.git
+.github
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.venv
+dist
+build
+*.log
+*.DS_Store
+README.md
+sonarrv4-openapi.json
+
