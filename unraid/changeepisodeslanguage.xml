@@ -19,148 +19,24 @@
   <CPUset/>
   <DateInstalled/>
   <DonateLink/>
-  <Description>Daily job that uses mkvtoolnix to set default audio/subtitle tracks on MKV anime episodes managed by Sonarr. Optional Transmission integration to exclude seeding files.</Description>
-  <Networking>
-    <Mode>bridge</Mode>
-  </Networking>
-  <Data>
-    <Volume>
-      <HostDir>/mnt/user/media</HostDir>
-      <ContainerDir>/path/to/media</ContainerDir>
-      <Mode>rw</Mode>
-    </Volume>
-  </Data>
-  <Environment>
-    <Variable>
-      <Name>SONARR_URL</Name>
-      <Value>http://sonarr:8989</Value>
-      <Mode/>
-      <Description>Base URL of Sonarr (v3 API).</Description>
-      <Display>always</Display>
-      <Required>true</Required>
-      <Mask>false</Mask>
-    </Variable>
-    <Variable>
-      <Name>SONARR_API_KEY</Name>
-      <Value></Value>
-      <Mode/>
-      <Description>Sonarr API key (Settings -&gt; General).</Description>
-      <Display>always</Display>
-      <Required>true</Required>
-      <Mask>true</Mask>
-    </Variable>
-    <Variable>
-      <Name>EXCLUDE_SEEDING</Name>
-      <Value>true</Value>
-      <Mode/>
-      <Description>Exclude files still seeding in Transmission.</Description>
-      <Display>advanced</Display>
-      <Required>false</Required>
-      <Mask>false</Mask>
-    </Variable>
-    <Variable>
-      <Name>TRANSMISSION_RPC_URL</Name>
-      <Value>http://transmission:9091/transmission/rpc</Value>
-      <Mode/>
-      <Description>Transmission RPC endpoint. Required if EXCLUDE_SEEDING=true.</Description>
-      <Display>advanced</Display>
-      <Required>false</Required>
-      <Mask>false</Mask>
-    </Variable>
-    <Variable>
-      <Name>TRANSMISSION_USER</Name>
-      <Value></Value>
-      <Mode/>
-      <Description>Transmission username (optional).</Description>
-      <Display>advanced</Display>
-      <Required>false</Required>
-      <Mask>false</Mask>
-    </Variable>
-    <Variable>
-      <Name>TRANSMISSION_PASSWORD</Name>
-      <Value></Value>
-      <Mode/>
-      <Description>Transmission password (optional).</Description>
-      <Display>advanced</Display>
-      <Required>false</Required>
-      <Mask>true</Mask>
-    </Variable>
-    <Variable>
-      <Name>PATH_MAP_FROM</Name>
-      <Value></Value>
-      <Mode/>
-      <Description>Rewrite prefix for Sonarr -&gt; Transmission path mapping (optional).</Description>
-      <Display>advanced</Display>
-      <Required>false</Required>
-      <Mask>false</Mask>
-    </Variable>
-    <Variable>
-      <Name>PATH_MAP_TO</Name>
-      <Value></Value>
-      <Mode/>
-      <Description>Rewrite prefix target for Sonarr -&gt; Transmission path mapping (optional).</Description>
-      <Display>advanced</Display>
-      <Required>false</Required>
-      <Mask>false</Mask>
-    </Variable>
-    <Variable>
-      <Name>FILE_PATH_MAP_FROM</Name>
-      <Value></Value>
-      <Mode/>
-      <Description>Rewrite prefix for Sonarr -&gt; Container file path mapping (optional).</Description>
-      <Display>advanced</Display>
-      <Required>false</Required>
-      <Mask>false</Mask>
-    </Variable>
-    <Variable>
-      <Name>FILE_PATH_MAP_TO</Name>
-      <Value></Value>
-      <Mode/>
-      <Description>Rewrite prefix target for Sonarr -&gt; Container file path mapping (optional).</Description>
-      <Display>advanced</Display>
-      <Required>false</Required>
-      <Mask>false</Mask>
-    </Variable>
-    <Variable>
-      <Name>POLL_INTERVAL_HOURS</Name>
-      <Value>24</Value>
-      <Mode/>
-      <Description>Polling interval in hours (default 24).</Description>
-      <Display>advanced</Display>
-      <Required>false</Required>
-      <Mask>false</Mask>
-    </Variable>
-    <Variable>
-      <Name>RUN_ONCE</Name>
-      <Value>false</Value>
-      <Mode/>
-      <Description>If true, run a single scan and exit.</Description>
-      <Display>advanced</Display>
-      <Required>false</Required>
-      <Mask>false</Mask>
-    </Variable>
-    <Variable>
-      <Name>DRY_RUN</Name>
-      <Value>false</Value>
-      <Mode/>
-      <Description>If true, log planned changes without modifying files.</Description>
-      <Display>advanced</Display>
-      <Required>false</Required>
-      <Mask>false</Mask>
-    </Variable>
-  </Environment>
   <Labels/>
-  <Config>
-    <Name>Media</Name>
-    <Target>/path/to/media</Target>
-    <Default>PATH: /mnt/user/media</Default>
-    <Description>Map to your media root so the container can read and edit MKV files.</Description>
-    <Type>Path</Type>
-    <Mode>rw</Mode>
-    <Display>always</Display>
-    <Required>true</Required>
-    <Mask>false</Mask>
-  </Config>
+  <!-- Paths -->
+  <Config Name="Media" Target="/path/to/media" Default="/mnt/user/media" Description="Map to your media root so the container can read and edit MKV files." Type="Path" Display="always" Required="true" Mask="false">rw</Config>
+
+  <!-- Variables -->
+  <Config Name="Sonarr URL" Target="SONARR_URL" Default="http://sonarr:8989" Description="Base URL of Sonarr (v3 API)." Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="Sonarr API Key" Target="SONARR_API_KEY" Default="" Description="Sonarr API key (Settings → General)." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Exclude seeding" Target="EXCLUDE_SEEDING" Default="true|false" Description="Exclude files still seeding in Transmission." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Transmission RPC URL" Target="TRANSMISSION_RPC_URL" Default="http://transmission:9091/transmission/rpc" Description="Transmission RPC endpoint. Required if EXCLUDE_SEEDING=true." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Transmission user" Target="TRANSMISSION_USER" Default="" Description="Transmission username (optional)." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Transmission password" Target="TRANSMISSION_PASSWORD" Default="" Description="Transmission password (optional)." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="PATH_MAP_FROM" Target="PATH_MAP_FROM" Default="" Description="Rewrite prefix for Sonarr → Transmission path mapping (optional)." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="PATH_MAP_TO" Target="PATH_MAP_TO" Default="" Description="Rewrite prefix target for Sonarr → Transmission path mapping (optional)." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="FILE_PATH_MAP_FROM" Target="FILE_PATH_MAP_FROM" Default="" Description="Rewrite prefix for Sonarr → Container file path mapping (optional)." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="FILE_PATH_MAP_TO" Target="FILE_PATH_MAP_TO" Default="" Description="Rewrite prefix target for Sonarr → Container file path mapping (optional)." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Poll interval hours" Target="POLL_INTERVAL_HOURS" Default="24" Description="Polling interval in hours (default 24)." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Run once" Target="RUN_ONCE" Default="false|true" Description="If true, run a single scan and exit." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Dry run" Target="DRY_RUN" Default="false|true" Description="If true, log planned changes without modifying files." Type="Variable" Display="advanced" Required="false" Mask="false"/>
 </Container>
 
 
