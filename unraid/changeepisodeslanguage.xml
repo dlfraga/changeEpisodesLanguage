@@ -16,7 +16,7 @@
   
   <Labels/>
   <!-- Paths -->
-  <Config Name="Media" Target="/path/to/media" Default="/mnt/user/media" Mode="rw" Description="Map to your media root so the container can read and edit MKV files." Type="Path" Display="always" Required="true" Mask="false">rw</Config>
+  <Config Name="Media Root" Target="/tv" Default="/mnt/user/TV" Mode="rw" Description="Map your TV media root (e.g. /mnt/user/TV)." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/TV</Config>
 
   <!-- Variables -->
   <Config Name="Sonarr URL" Target="SONARR_URL" Default="http://sonarr:8989" Description="Base URL of Sonarr (v3 API)." Type="Variable" Display="always" Required="true" Mask="false"/>
