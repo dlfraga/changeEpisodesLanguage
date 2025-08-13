@@ -150,6 +150,40 @@ class MkvTool:
         return json.loads(result.stdout)
 
     @staticmethod
+    def _get_default_track_id(inspect: Dict, track_type: str) -> Optional[int]:
+        for t in inspect.get("tracks", []):
+            if t.get("type") != track_type:
+                continue
+            props = t.get("properties") or {}
+            if props.get("default_track") is True:
+                return t.get("id")
+        return None
+
+    def is_file_compliant(self, inspect: Dict) -> bool:
+        """Return True when the file already has Japanese as default audio AND English as default subs."""
+        # Default audio must be Japanese
+        default_audio_id = self._get_default_track_id(inspect, "audio")
+        has_jpn_audio_default = False
+        if default_audio_id is not None:
+            for t in inspect.get("tracks", []):
+                if t.get("id") == default_audio_id:
+                    lang = self._lang_code((t.get("properties") or {}).get("language"))
+                    has_jpn_audio_default = (lang == "jpn")
+                    break
+
+        # Default subs must be English
+        default_sub_id = self._get_default_track_id(inspect, "subtitles")
+        has_eng_sub_default = False
+        if default_sub_id is not None:
+            for t in inspect.get("tracks", []):
+                if t.get("id") == default_sub_id:
+                    lang = self._lang_code((t.get("properties") or {}).get("language"))
+                    has_eng_sub_default = (lang == "eng")
+                    break
+
+        return bool(has_jpn_audio_default and has_eng_sub_default)
+
+    @staticmethod
     def _is_signs_track(name: Optional[str]) -> bool:
         if not name:
             return False
@@ -388,16 +422,20 @@ def process_once() -> None:
 
             try:
                 inspect = mkv.identify_tracks(effective_path)
+                # If already compliant (JP default audio and EN default subs), be silent
+                if mkv.is_file_compliant(inspect):
+                    continue
+
                 selection = mkv.choose_tracks(inspect)
                 if selection.audio_track_index is None and selection.subtitle_track_index is None:
-                    logging.info("No applicable tracks found; skipping: %s", effective_path)
+                    # No changes needed or possible
                     continue
                 mkv.apply_flags(effective_path, inspect, selection)
                 files_modified += 1
                 if selection.should_change_audio:
-                    logging.info("Set default audio to Japanese and ensured subtitles default: %s", effective_path)
+                    logging.info("Updated: set default audio to Japanese and ensured default subtitles (%s): %s", selection.subtitle_language_code or "auto", effective_path)
                 else:
-                    logging.info("Ensured subtitles default is set (no Japanese audio track present): %s", effective_path)
+                    logging.info("Updated: ensured default subtitles (%s) when no Japanese audio present: %s", selection.subtitle_language_code or "auto", effective_path)
             except subprocess.CalledProcessError as e:
                 errors += 1
                 logging.warning("Command failed for %s: %s", effective_path, e)
