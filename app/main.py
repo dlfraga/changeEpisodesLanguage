@@ -161,16 +161,24 @@ class MkvTool:
         return None
 
     def is_file_compliant(self, inspect: Dict) -> bool:
-        """Return True when the file already has Japanese as default audio AND English as default subs."""
-        # Default audio must be Japanese
-        default_audio_id = self._get_default_track_id(inspect, "audio")
-        has_jpn_audio_default = False
-        if default_audio_id is not None:
-            for t in inspect.get("tracks", []):
-                if t.get("id") == default_audio_id:
-                    lang = self._lang_code((t.get("properties") or {}).get("language"))
-                    has_jpn_audio_default = (lang == "jpn")
-                    break
+        """Return True when the file already has Japanese as default audio AND English as default subs.
+        OR when there's only one audio track (any language) AND English as default subs."""
+        # Check audio tracks
+        audio_tracks = [t for t in inspect.get("tracks", []) if t.get("type") == "audio"]
+        
+        # If only one audio track, consider audio as 'ok' regardless of language
+        if len(audio_tracks) == 1:
+            audio_ok = True
+        else:
+            # Multiple audio tracks - default must be Japanese
+            default_audio_id = self._get_default_track_id(inspect, "audio")
+            audio_ok = False
+            if default_audio_id is not None:
+                for t in inspect.get("tracks", []):
+                    if t.get("id") == default_audio_id:
+                        lang = self._lang_code((t.get("properties") or {}).get("language"))
+                        audio_ok = (lang == "jpn")
+                        break
 
         # Default subs must be English
         default_sub_id = self._get_default_track_id(inspect, "subtitles")
@@ -182,7 +190,7 @@ class MkvTool:
                     has_eng_sub_default = (lang == "eng")
                     break
 
-        return bool(has_jpn_audio_default and has_eng_sub_default)
+        return bool(audio_ok and has_eng_sub_default)
 
     @staticmethod
     def _is_signs_track(name: Optional[str]) -> bool:
@@ -247,8 +255,19 @@ class MkvTool:
         # Decision logic per updated requirements:
         # - Always change audio default to Japanese when available
         # - Always enable a default subtitle track (prefer EN Full -> EN -> any)
+        # - If only one audio track, don't change audio but still manage subtitles
         chosen_sub_idx = english_full_id or english_any_id or any_sub_id
         chosen_sub_lang = "eng" if (english_full_id or english_any_id) else None
+
+        # If only one audio track, don't change audio but still manage subtitles
+        if len(audio_tracks) == 1:
+            return TrackSelection(
+                audio_track_index=None,
+                subtitle_track_index=chosen_sub_idx,
+                should_change_audio=False,
+                audio_language_code=None,
+                subtitle_language_code=chosen_sub_lang,
+            )
 
         if japanese_audio_id is not None:
             return TrackSelection(
@@ -369,6 +388,7 @@ class FileReport:
     subtitle_language_code: Optional[str]
     was_compliant: bool
     skip_reason: Optional[str]  # Why the file was skipped (if applicable)
+    has_single_audio_track: bool  # Whether file has only one audio track
 
 
 def generate_report(reports: List[FileReport], output_dir: Optional[str] = None) -> None:
@@ -402,7 +422,10 @@ def generate_report(reports: List[FileReport], output_dir: Optional[str] = None)
             "missing_english_subs": [],
             "unusual_language_codes": [],
             "common_track_names": {},
-            "potential_language_mismatches": []
+            "potential_language_mismatches": [],
+            "single_audio_track_files": [],
+            "audio_track_count_distribution": {},
+            "files_needing_attention": []
         }
         
         for report in reports:
@@ -446,6 +469,45 @@ def generate_report(reports: List[FileReport], output_dir: Optional[str] = None)
                             "track_type": track.get("type"),
                             "language": lang,
                             "track_id": track.get("id")
+                        })
+                
+                # Track single audio track files
+                if len(report.audio_tracks) == 1:
+                    language_analysis["single_audio_track_files"].append({
+                        "file_path": report.file_path,
+                        "audio_language": (report.audio_tracks[0].get("properties") or {}).get("language", "unknown"),
+                        "audio_track_name": (report.audio_tracks[0].get("properties") or {}).get("track_name", "")
+                    })
+                
+                # Track audio track count distribution
+                track_count = len(report.audio_tracks)
+                if track_count not in language_analysis["audio_track_count_distribution"]:
+                    language_analysis["audio_track_count_distribution"][track_count] = 0
+                language_analysis["audio_track_count_distribution"][track_count] += 1
+                
+                # Check if file needs attention
+                if report.audio_tracks and report.subtitle_tracks:
+                    has_jpn_audio = any(
+                        (track.get("properties") or {}).get("language") in ["jpn", "ja", "japanese"] 
+                        for track in report.audio_tracks
+                    )
+                    has_eng_subs = any(
+                        (track.get("properties") or {}).get("language") in ["eng", "en", "english"] 
+                        for track in report.subtitle_tracks
+                    )
+                    if has_jpn_audio and not has_eng_subs:
+                        language_analysis["files_needing_attention"].append({
+                            "file_path": report.file_path,
+                            "issue": "Has Japanese audio but no English subtitles",
+                            "audio_languages": [(t.get("properties") or {}).get("language", "unknown") for t in report.audio_tracks],
+                            "subtitle_languages": [(t.get("properties") or {}).get("language", "unknown") for t in report.subtitle_tracks]
+                        })
+                    elif not has_jpn_audio and not has_eng_subs:
+                        language_analysis["files_needing_attention"].append({
+                            "file_path": report.file_path,
+                            "issue": "No Japanese audio and no English subtitles",
+                            "audio_languages": [(t.get("properties") or {}).get("language", "unknown") for t in report.audio_tracks],
+                            "subtitle_languages": [(t.get("properties") or {}).get("language", "unknown") for t in report.subtitle_tracks]
                         })
                 
                 # Collect track names for analysis
@@ -526,7 +588,8 @@ def generate_report(reports: List[FileReport], output_dir: Optional[str] = None)
             f.write(f"  Files modified: {len([r for r in reports if r.was_modified])}\n")
             f.write(f"  Files skipped (seeding): {len([r for r in reports if r.is_seeded])}\n")
             f.write(f"  Files with errors: {len([r for r in reports if r.error_message])}\n")
-            f.write(f"  Files already compliant: {len([r for r in reports if r.was_compliant])}\n\n")
+            f.write(f"  Files already compliant: {len([r for r in reports if r.was_compliant])}\n")
+            f.write(f"  Files with single audio track: {len([r for r in reports if r.has_single_audio_track])}\n\n")
             
             # Group files by skip reason
             skip_reasons = {}
@@ -565,6 +628,17 @@ def generate_report(reports: List[FileReport], output_dir: Optional[str] = None)
                     f.write(f"  Audio Languages Found:\n")
                     for lang, count in sorted(audio_langs.items(), key=lambda x: x[1], reverse=True):
                         f.write(f"    {lang}: {count} tracks\n")
+                
+                # Audio track count distribution
+                audio_track_counts = {}
+                for report in non_seeded_reports:
+                    count = len(report.audio_tracks)
+                    audio_track_counts[count] = audio_track_counts.get(count, 0) + 1
+                
+                if audio_track_counts:
+                    f.write(f"  Audio Track Count Distribution:\n")
+                    for count in sorted(audio_track_counts.keys()):
+                        f.write(f"    {count} track(s): {audio_track_counts[count]} files\n")
                 
                 # Subtitle languages
                 sub_langs = {}
@@ -675,6 +749,86 @@ def generate_report(reports: List[FileReport], output_dir: Optional[str] = None)
                     f.write(f"    Issue: {reason}\n\n")
                 if len(potential_mismatches) > 10:
                     f.write(f"  ... and {len(potential_mismatches) - 10} more potential mismatches\n\n")
+            
+            # Show files with potential language code mismatches (from JSON analysis)
+            if language_analysis.get("potential_language_mismatches"):
+                f.write(f"Language Code Mismatches (from detailed analysis):\n")
+                f.write(f"{'='*40}\n")
+                f.write(f"  Total: {len(language_analysis['potential_language_mismatches'])} potential mismatches\n\n")
+                # Show first few examples
+                for mismatch in language_analysis["potential_language_mismatches"][:10]:
+                    f.write(f"  - {mismatch['file_path']}\n")
+                    f.write(f"    Track: {mismatch['track_type']}\n")
+                    f.write(f"    Language Code: {mismatch['language_code']}\n")
+                    f.write(f"    Track Name: '{mismatch['track_name']}'\n")
+                    f.write(f"    Issue: {mismatch['issue']}\n\n")
+                if len(language_analysis["potential_language_mismatches"]) > 10:
+                    f.write(f"  ... and {len(language_analysis['potential_language_mismatches']) - 10} more potential mismatches\n\n")
+            
+            # Show files that might need manual attention
+            files_needing_attention = []
+            for report in reports:
+                if not report.is_seeded and not report.error_message and not report.was_compliant:
+                    # Files that weren't modified but should have been
+                    if report.audio_tracks and report.subtitle_tracks:
+                        # Check if there are Japanese audio tracks but no English subs
+                        has_jpn_audio = any(
+                            (track.get("properties") or {}).get("language") in ["jpn", "ja", "japanese"] 
+                            for track in report.audio_tracks
+                        )
+                        has_eng_subs = any(
+                            (track.get("properties") or {}).get("language") in ["eng", "en", "english"] 
+                            for track in report.subtitle_tracks
+                        )
+                        if has_jpn_audio and not has_eng_subs:
+                            files_needing_attention.append((report.file_path, "Has Japanese audio but no English subtitles"))
+                        elif not has_jpn_audio and not has_eng_subs:
+                            files_needing_attention.append((report.file_path, "No Japanese audio and no English subtitles"))
+            
+            if files_needing_attention:
+                f.write(f"Files That May Need Manual Attention:\n")
+                f.write(f"{'='*35}\n")
+                f.write(f"  Total: {len(files_needing_attention)} files\n\n")
+                for file_path, reason in files_needing_attention[:10]:
+                    f.write(f"  - {file_path}\n")
+                    f.write(f"    Issue: {reason}\n")
+                if len(files_needing_attention) > 10:
+                    f.write(f"  ... and {len(files_needing_attention) - 10} more\n")
+                f.write("\n")
+            
+            # Show single audio track files
+            single_audio_files = [r for r in reports if r.has_single_audio_track and not r.is_seeded and not r.error_message]
+            if single_audio_files:
+                f.write(f"Files with Single Audio Track:\n")
+                f.write(f"{'='*30}\n")
+                f.write(f"  Total: {len(single_audio_files)} files\n")
+                f.write(f"  These files are treated as 'audio OK' regardless of language\n\n")
+                # Show first few examples
+                for report in single_audio_files[:5]:
+                    f.write(f"  - {report.file_path}\n")
+                    if report.audio_tracks:
+                        track = report.audio_tracks[0]
+                        props = track.get("properties", {})
+                        lang = props.get("language", "unknown")
+                        name = props.get("track_name", "")
+                        f.write(f"    Audio: {lang} {name}\n")
+                if len(single_audio_files) > 5:
+                    f.write(f"  ... and {len(single_audio_files) - 5} more\n")
+                f.write("\n")
+            
+            # Show most common issues
+            issue_counts = {}
+            for report in reports:
+                if report.skip_reason and not report.was_modified:
+                    reason = report.skip_reason
+                    issue_counts[reason] = issue_counts.get(reason, 0) + 1
+            
+            if issue_counts:
+                f.write(f"Most Common Issues:\n")
+                f.write(f"{'='*20}\n")
+                for reason, count in sorted(issue_counts.items(), key=lambda x: x[1], reverse=True):
+                    f.write(f"  {reason}: {count} files\n")
+                f.write("\n")
             
             f.write(f"Detailed File Information:\n")
             f.write(f"{'='*50}\n\n")
@@ -817,7 +971,8 @@ def process_once() -> None:
                     audio_language_code=None,
                     subtitle_language_code=None,
                     was_compliant=False,
-                    skip_reason="File is currently seeding"
+                    skip_reason="File is currently seeding",
+                    has_single_audio_track=False
                 ))
                 continue
 
@@ -848,7 +1003,8 @@ def process_once() -> None:
                         audio_language_code=None,
                         subtitle_language_code=None,
                         was_compliant=True,
-                        skip_reason="File already compliant (Japanese audio + English subtitles as default)"
+                        skip_reason="File already compliant (audio OK + English subtitles as default)",
+                        has_single_audio_track=len(audio_tracks) == 1
                     ))
                     continue
 
@@ -870,7 +1026,8 @@ def process_once() -> None:
                         audio_language_code=None,
                         subtitle_language_code=None,
                         was_compliant=False,
-                        skip_reason="No suitable tracks found for modification"
+                        skip_reason="No suitable tracks found for modification",
+                        has_single_audio_track=len(audio_tracks) == 1
                     ))
                     continue
                 
@@ -894,7 +1051,8 @@ def process_once() -> None:
                     audio_language_code=selection.audio_language_code,
                     subtitle_language_code=selection.subtitle_language_code,
                     was_compliant=False,
-                    skip_reason=None
+                    skip_reason=None,
+                    has_single_audio_track=len(audio_tracks) == 1
                 ))
                 
                 if selection.should_change_audio:
@@ -922,7 +1080,8 @@ def process_once() -> None:
                     audio_language_code=None,
                     subtitle_language_code=None,
                     was_compliant=False,
-                    skip_reason="Command execution failed"
+                    skip_reason="Command execution failed",
+                    has_single_audio_track=False
                 ))
                 
             except Exception as e:
@@ -945,7 +1104,8 @@ def process_once() -> None:
                     audio_language_code=None,
                     subtitle_language_code=None,
                     was_compliant=False,
-                    skip_reason="General processing error"
+                    skip_reason="General processing error",
+                    has_single_audio_track=False
                 ))
 
     # Generate report if enabled
