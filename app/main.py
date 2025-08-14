@@ -6,8 +6,9 @@ import logging
 import pathlib
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Set, Tuple
+from datetime import datetime
 
 import requests
 
@@ -351,6 +352,379 @@ def is_seeded(sonarr_path: str, seeded_paths: Set[str], seeded_name_sizes: Set[T
     return False
 
 
+@dataclass
+class FileReport:
+    file_path: str
+    series_title: str
+    episode_title: str
+    file_size: int
+    is_seeded: bool
+    was_modified: bool
+    error_message: Optional[str]
+    audio_tracks: List[Dict]
+    subtitle_tracks: List[Dict]
+    selected_audio_track: Optional[int]
+    selected_subtitle_track: Optional[int]
+    audio_language_code: Optional[str]
+    subtitle_language_code: Optional[str]
+    was_compliant: bool
+    skip_reason: Optional[str]  # Why the file was skipped (if applicable)
+
+
+def generate_report(reports: List[FileReport], output_dir: Optional[str] = None) -> None:
+    """Generate a detailed report of all files processed."""
+    try:
+        # Use default directory if none specified
+        if output_dir is None:
+            output_dir = "/report"
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Generate timestamp for filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_file = os.path.join(output_dir, f"anime_language_report_{timestamp}.json")
+        
+        # Convert reports to serializable format
+        serializable_reports = []
+        for report in reports:
+            report_dict = asdict(report)
+            # Ensure all values are JSON serializable
+            if report_dict.get("error_message") is None:
+                report_dict["error_message"] = ""
+            serializable_reports.append(report_dict)
+        
+        # Analyze language codes for insights
+        language_analysis = {
+            "audio_languages": {},
+            "subtitle_languages": {},
+            "missing_japanese_audio": [],
+            "missing_english_subs": [],
+            "unusual_language_codes": [],
+            "common_track_names": {},
+            "potential_language_mismatches": []
+        }
+        
+        for report in reports:
+            if not report.is_seeded and not report.error_message:
+                # Analyze audio tracks
+                for track in report.audio_tracks:
+                    lang = (track.get("properties") or {}).get("language", "unknown")
+                    if lang not in language_analysis["audio_languages"]:
+                        language_analysis["audio_languages"][lang] = 0
+                    language_analysis["audio_languages"][lang] += 1
+                
+                # Analyze subtitle tracks
+                for track in report.subtitle_tracks:
+                    lang = (track.get("properties") or {}).get("language", "unknown")
+                    if lang not in language_analysis["subtitle_languages"]:
+                        language_analysis["subtitle_languages"][lang] = 0
+                    language_analysis["subtitle_languages"][lang] += 1
+                
+                # Check for missing Japanese audio
+                has_jpn_audio = any(
+                    (track.get("properties") or {}).get("language") in ["jpn", "ja", "japanese"] 
+                    for track in report.audio_tracks
+                )
+                if not has_jpn_audio:
+                    language_analysis["missing_japanese_audio"].append(report.file_path)
+                
+                # Check for missing English subs
+                has_eng_subs = any(
+                    (track.get("properties") or {}).get("language") in ["eng", "en", "english"] 
+                    for track in report.subtitle_tracks
+                )
+                if not has_eng_subs:
+                    language_analysis["missing_english_subs"].append(report.file_path)
+                
+                # Check for unusual language codes
+                for track in report.audio_tracks + report.subtitle_tracks:
+                    lang = (track.get("properties") or {}).get("language", "")
+                    if lang and lang not in ["jpn", "ja", "japanese", "eng", "en", "english", "unknown"]:
+                        language_analysis["unusual_language_codes"].append({
+                            "file_path": report.file_path,
+                            "track_type": track.get("type"),
+                            "language": lang,
+                            "track_id": track.get("id")
+                        })
+                
+                # Collect track names for analysis
+                for track in report.audio_tracks + report.subtitle_tracks:
+                    name = (track.get("properties") or {}).get("track_name", "")
+                    if name:
+                        if name not in language_analysis["common_track_names"]:
+                            language_analysis["common_track_names"][name] = {
+                                "count": 0,
+                                "files": [],
+                                "track_types": set()
+                            }
+                        language_analysis["common_track_names"][name]["count"] += 1
+                        if len(language_analysis["common_track_names"][name]["files"]) < 5:  # Keep first 5 files
+                            language_analysis["common_track_names"][name]["files"].append(report.file_path)
+                        language_analysis["common_track_names"][name]["track_types"].add(track.get("type"))
+        
+        # Convert sets to lists for JSON serialization
+        for name_info in language_analysis["common_track_names"].values():
+            name_info["track_types"] = list(name_info["track_types"])
+        
+        # Check for potential language code mismatches
+        for report in reports:
+            if not report.is_seeded and not report.error_message:
+                for track in report.audio_tracks + report.subtitle_tracks:
+                    lang = (track.get("properties") or {}).get("language", "")
+                    name = (track.get("properties") or {}).get("track_name", "")
+                    if lang and name:
+                        # Check if track name suggests different language than language code
+                        name_lower = name.lower()
+                        if lang in ["jpn", "ja", "japanese"] and any(x in name_lower for x in ["eng", "english", "en"]):
+                            language_analysis["potential_language_mismatches"].append({
+                                "file_path": report.file_path,
+                                "track_type": track.get("type"),
+                                "language_code": lang,
+                                "track_name": name,
+                                "issue": "Name suggests English but code is Japanese"
+                            })
+                        elif lang in ["eng", "en", "english"] and any(x in name_lower for x in ["jpn", "japanese", "ja"]):
+                            language_analysis["potential_language_mismatches"].append({
+                                "file_path": report.file_path,
+                                "track_type": track.get("type"),
+                                "language_code": lang,
+                                "track_name": name,
+                                "issue": "Name suggests Japanese but code is English"
+                            })
+                        elif lang not in ["jpn", "ja", "japanese", "eng", "en", "english"] and any(x in name_lower for x in ["jpn", "japanese", "ja", "eng", "english", "en"]):
+                            language_analysis["potential_language_mismatches"].append({
+                                "file_path": report.file_path,
+                                "track_type": track.get("type"),
+                                "language_code": lang,
+                                "track_name": name,
+                                "issue": "Name suggests Japanese/English but code is different"
+                            })
+        
+        # Write JSON report
+        with open(report_file, 'w', encoding='utf-8') as f:
+            json.dump({
+                "generated_at": datetime.now().isoformat(),
+                "total_files": len(reports),
+                "files_modified": len([r for r in reports if r.was_modified]),
+                "files_skipped_seeding": len([r for r in reports if r.is_seeded]),
+                "files_with_errors": len([r for r in reports if r.error_message]),
+                "files_already_compliant": len([r for r in reports if r.was_compliant]),
+                "language_analysis": language_analysis,
+                "reports": serializable_reports
+            }, f, indent=2, ensure_ascii=False)
+        
+        # Generate summary text report
+        summary_file = os.path.join(output_dir, f"anime_language_summary_{timestamp}.txt")
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            f.write(f"Anime Language Processing Report\n")
+            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"{'='*50}\n\n")
+            
+            f.write(f"Summary:\n")
+            f.write(f"  Total files processed: {len(reports)}\n")
+            f.write(f"  Files modified: {len([r for r in reports if r.was_modified])}\n")
+            f.write(f"  Files skipped (seeding): {len([r for r in reports if r.is_seeded])}\n")
+            f.write(f"  Files with errors: {len([r for r in reports if r.error_message])}\n")
+            f.write(f"  Files already compliant: {len([r for r in reports if r.was_compliant])}\n\n")
+            
+            # Group files by skip reason
+            skip_reasons = {}
+            for report in reports:
+                if report.skip_reason and not report.was_modified:
+                    reason = report.skip_reason
+                    if reason not in skip_reasons:
+                        skip_reasons[reason] = []
+                    skip_reasons[reason].append(report.file_path)
+            
+            if skip_reasons:
+                f.write(f"Files Skipped by Reason:\n")
+                f.write(f"{'='*30}\n")
+                for reason, files in skip_reasons.items():
+                    f.write(f"  {reason}: {len(files)} files\n")
+                    for file_path in files[:5]:  # Show first 5 files
+                        f.write(f"    - {file_path}\n")
+                    if len(files) > 5:
+                        f.write(f"    ... and {len(files) - 5} more\n")
+                    f.write("\n")
+            
+            # Add language analysis summary
+            non_seeded_reports = [r for r in reports if not r.is_seeded and not r.error_message]
+            if non_seeded_reports:
+                f.write(f"Language Analysis:\n")
+                f.write(f"{'='*20}\n")
+                
+                # Audio languages
+                audio_langs = {}
+                for report in non_seeded_reports:
+                    for track in report.audio_tracks:
+                        lang = (track.get("properties") or {}).get("language", "unknown")
+                        audio_langs[lang] = audio_langs.get(lang, 0) + 1
+                
+                if audio_langs:
+                    f.write(f"  Audio Languages Found:\n")
+                    for lang, count in sorted(audio_langs.items(), key=lambda x: x[1], reverse=True):
+                        f.write(f"    {lang}: {count} tracks\n")
+                
+                # Subtitle languages
+                sub_langs = {}
+                for report in non_seeded_reports:
+                    for track in report.subtitle_tracks:
+                        lang = (track.get("properties") or {}).get("language", "unknown")
+                        sub_langs[lang] = sub_langs.get(lang, 0) + 1
+                
+                if sub_langs:
+                    f.write(f"  Subtitle Languages Found:\n")
+                    for lang, count in sorted(sub_langs.items(), key=lambda x: x[1], reverse=True):
+                        f.write(f"    {lang}: {count} tracks\n")
+                
+                # Missing languages
+                missing_jpn = [r.file_path for r in non_seeded_reports if not any(
+                    (track.get("properties") or {}).get("language") in ["jpn", "ja", "japanese"] 
+                    for track in r.audio_tracks
+                )]
+                if missing_jpn:
+                    f.write(f"  Files Missing Japanese Audio: {len(missing_jpn)}\n")
+                    for file_path in missing_jpn[:3]:
+                        f.write(f"    - {file_path}\n")
+                    if len(missing_jpn) > 3:
+                        f.write(f"    ... and {len(missing_jpn) - 3} more\n")
+                
+                missing_eng = [r.file_path for r in non_seeded_reports if not any(
+                    (track.get("properties") or {}).get("language") in ["eng", "en", "english"] 
+                    for track in r.subtitle_tracks
+                )]
+                if missing_eng:
+                    f.write(f"  Files Missing English Subtitles: {len(missing_eng)}\n")
+                    for file_path in missing_eng[:3]:
+                        f.write(f"    - {file_path}\n")
+                    if len(missing_eng) > 3:
+                        f.write(f"    ... and {len(missing_eng) - 3} more\n")
+                
+                # Show files with unusual language codes that might need attention
+                unusual_langs = []
+                for report in non_seeded_reports:
+                    for track in report.audio_tracks + report.subtitle_tracks:
+                        lang = (track.get("properties") or {}).get("language", "")
+                        if lang and lang not in ["jpn", "ja", "japanese", "eng", "en", "english", "unknown"]:
+                            unusual_langs.append((report.file_path, track.get("type"), lang))
+                
+                if unusual_langs:
+                    f.write(f"  Files with Unusual Language Codes (may need attention):\n")
+                    # Group by language code
+                    lang_groups = {}
+                    for file_path, track_type, lang in unusual_langs:
+                        if lang not in lang_groups:
+                            lang_groups[lang] = []
+                        lang_groups[lang].append((file_path, track_type))
+                    
+                    for lang, entries in lang_groups.items():
+                        f.write(f"    {lang}: {len(entries)} tracks\n")
+                        for file_path, track_type in entries[:3]:
+                            f.write(f"      - {file_path} ({track_type})\n")
+                        if len(entries) > 3:
+                            f.write(f"      ... and {len(entries) - 3} more\n")
+                
+                # Show common track names that might indicate language code issues
+                track_names = {}
+                for report in non_seeded_reports:
+                    for track in report.audio_tracks + report.subtitle_tracks:
+                        name = (track.get("properties") or {}).get("track_name", "")
+                        if name:
+                            if name not in track_names:
+                                track_names[name] = {"count": 0, "files": []}
+                            track_names[name]["count"] += 1
+                            if len(track_names[name]["files"]) < 3:  # Keep first 3 files
+                                track_names[name]["files"].append(report.file_path)
+                
+                if track_names:
+                    f.write(f"  Common Track Names (may indicate language code issues):\n")
+                    # Sort by frequency
+                    sorted_names = sorted(track_names.items(), key=lambda x: x[1]["count"], reverse=True)
+                    for name, info in sorted_names[:10]:  # Show top 10
+                        f.write(f"    '{name}': {info['count']} occurrences\n")
+                        for file_path in info["files"]:
+                            f.write(f"      - {file_path}\n")
+                
+                f.write("\n")
+            
+            # Check for potential language code mismatches
+            potential_mismatches = []
+            for report in non_seeded_reports:
+                for track in report.audio_tracks + report.subtitle_tracks:
+                    lang = (track.get("properties") or {}).get("language", "")
+                    name = (track.get("properties") or {}).get("track_name", "")
+                    if lang and name:
+                        # Check if track name suggests different language than language code
+                        name_lower = name.lower()
+                        if lang in ["jpn", "ja", "japanese"] and any(x in name_lower for x in ["eng", "english", "en"]):
+                            potential_mismatches.append((report.file_path, track.get("type"), lang, name, "Name suggests English but code is Japanese"))
+                        elif lang in ["eng", "en", "english"] and any(x in name_lower for x in ["jpn", "japanese", "ja"]):
+                            potential_mismatches.append((report.file_path, track.get("type"), lang, name, "Name suggests Japanese but code is English"))
+                        elif lang not in ["jpn", "ja", "japanese", "eng", "en", "english"] and any(x in name_lower for x in ["jpn", "japanese", "ja", "eng", "english", "en"]):
+                            potential_mismatches.append((report.file_path, track.get("type"), lang, name, "Name suggests Japanese/English but code is different"))
+            
+            if potential_mismatches:
+                f.write(f"Potential Language Code Mismatches:\n")
+                f.write(f"{'='*35}\n")
+                for file_path, track_type, lang, name, reason in potential_mismatches[:10]:  # Show first 10
+                    f.write(f"  {file_path}\n")
+                    f.write(f"    Track: {track_type}\n")
+                    f.write(f"    Language Code: {lang}\n")
+                    f.write(f"    Track Name: '{name}'\n")
+                    f.write(f"    Issue: {reason}\n\n")
+                if len(potential_mismatches) > 10:
+                    f.write(f"  ... and {len(potential_mismatches) - 10} more potential mismatches\n\n")
+            
+            f.write(f"Detailed File Information:\n")
+            f.write(f"{'='*50}\n\n")
+            
+            for i, report in enumerate(reports, 1):
+                f.write(f"File {i}: {report.file_path}\n")
+                f.write(f"  Series: {report.series_title}\n")
+                f.write(f"  Episode: {report.episode_title}\n")
+                f.write(f"  Size: {report.file_size:,} bytes\n")
+                f.write(f"  Status: {'Seeded' if report.is_seeded else 'Not Seeded'}")
+                if report.was_modified:
+                    f.write(" | Modified")
+                if report.was_compliant:
+                    f.write(" | Already Compliant")
+                if report.error_message:
+                    f.write(f" | Error: {report.error_message}")
+                if report.skip_reason and not report.was_modified:
+                    f.write(f" | Skipped: {report.skip_reason}")
+                f.write("\n")
+                
+                f.write(f"  Audio Tracks ({len(report.audio_tracks)}):\n")
+                for track in report.audio_tracks:
+                    props = track.get("properties", {})
+                    lang = props.get("language", "unknown")
+                    name = props.get("track_name", "")
+                    default = " (default)" if props.get("default_track") else ""
+                    f.write(f"    Track {track.get('id')}: {lang} {name}{default}\n")
+                
+                f.write(f"  Subtitle Tracks ({len(report.subtitle_tracks)}):\n")
+                for track in report.subtitle_tracks:
+                    props = track.get("properties", {})
+                    lang = props.get("language", "unknown")
+                    name = props.get("track_name", "")
+                    default = " (default)" if props.get("default_track") else ""
+                    f.write(f"    Track {track.get('id')}: {lang} {name}{default}\n")
+                
+                if report.selected_audio_track is not None:
+                    f.write(f"  Selected Audio: Track {report.selected_audio_track} ({report.audio_language_code})\n")
+                if report.selected_subtitle_track is not None:
+                    f.write(f"  Selected Subtitle: Track {report.selected_subtitle_track} ({report.subtitle_language_code})\n")
+                
+                f.write("\n")
+        
+        logging.info(f"Report generated: {report_file}")
+        logging.info(f"Summary generated: {summary_file}")
+        
+    except Exception as e:
+        logging.error(f"Failed to generate report: {e}")
+
+
 def process_once() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
 
@@ -362,6 +736,8 @@ def process_once() -> None:
 
     exclude_seeding = get_env_bool("EXCLUDE_SEEDING", True)
     dry_run = get_env_bool("DRY_RUN", False)
+    generate_reports = get_env_bool("GENERATE_REPORTS", True)
+    report_directory = os.getenv("REPORT_DIRECTORY", "/report")
 
     transmission_client: Optional[TransmissionClient] = None
     if exclude_seeding:
@@ -388,6 +764,9 @@ def process_once() -> None:
     files_modified = 0
     files_skipped_seed = 0
     errors = 0
+    
+    # Collect reports for all files
+    file_reports: List[FileReport] = []
 
     for s in anime_series:
         sid = s.get("id")
@@ -415,33 +794,165 @@ def process_once() -> None:
                 effective_path = normalize_path(effective_path.replace(file_map_from, file_map_to, 1))
 
             files_considered += 1
-            if exclude_seeding and is_seeded(path, seeded_paths, seeded_name_sizes, size_bytes=size):
+            
+            # Check if file is seeded
+            is_seeded_status = exclude_seeding and is_seeded(path, seeded_paths, seeded_name_sizes, size_bytes=size)
+            if is_seeded_status:
                 files_skipped_seed += 1
                 logging.info("Skipping (seeding): %s", path)
+                
+                # Still create a report for seeded files
+                file_reports.append(FileReport(
+                    file_path=path,
+                    series_title=title,
+                    episode_title=ep.get("title", "Unknown"),
+                    file_size=size or 0,
+                    is_seeded=True,
+                    was_modified=False,
+                    error_message=None,
+                    audio_tracks=[],
+                    subtitle_tracks=[],
+                    selected_audio_track=None,
+                    selected_subtitle_track=None,
+                    audio_language_code=None,
+                    subtitle_language_code=None,
+                    was_compliant=False,
+                    skip_reason="File is currently seeding"
+                ))
                 continue
 
             try:
                 inspect = mkv.identify_tracks(effective_path)
-                # If already compliant (JP default audio and EN default subs), be silent
-                if mkv.is_file_compliant(inspect):
+                
+                # Extract track information for report
+                audio_tracks = [t for t in inspect.get("tracks", []) if t.get("type") == "audio"]
+                subtitle_tracks = [t for t in inspect.get("tracks", []) if t.get("type") == "subtitles"]
+                
+                # Check if already compliant
+                was_compliant = mkv.is_file_compliant(inspect)
+                
+                if was_compliant:
+                    # File is already compliant, still create report
+                    file_reports.append(FileReport(
+                        file_path=path,
+                        series_title=title,
+                        episode_title=ep.get("title", "Unknown"),
+                        file_size=size or 0,
+                        is_seeded=False,
+                        was_modified=False,
+                        error_message=None,
+                        audio_tracks=audio_tracks,
+                        subtitle_tracks=subtitle_tracks,
+                        selected_audio_track=None,
+                        selected_subtitle_track=None,
+                        audio_language_code=None,
+                        subtitle_language_code=None,
+                        was_compliant=True,
+                        skip_reason="File already compliant (Japanese audio + English subtitles as default)"
+                    ))
                     continue
 
                 selection = mkv.choose_tracks(inspect)
                 if selection.audio_track_index is None and selection.subtitle_track_index is None:
-                    # No changes needed or possible
+                    # No changes needed or possible, still create report
+                    file_reports.append(FileReport(
+                        file_path=path,
+                        series_title=title,
+                        episode_title=ep.get("title", "Unknown"),
+                        file_size=size or 0,
+                        is_seeded=False,
+                        was_modified=False,
+                        error_message=None,
+                        audio_tracks=audio_tracks,
+                        subtitle_tracks=subtitle_tracks,
+                        selected_audio_track=None,
+                        selected_subtitle_track=None,
+                        audio_language_code=None,
+                        subtitle_language_code=None,
+                        was_compliant=False,
+                        skip_reason="No suitable tracks found for modification"
+                    ))
                     continue
+                
+                # Apply changes
                 mkv.apply_flags(effective_path, inspect, selection)
                 files_modified += 1
+                
+                # Create report for modified file
+                file_reports.append(FileReport(
+                    file_path=path,
+                    series_title=title,
+                    episode_title=ep.get("title", "Unknown"),
+                    file_size=size or 0,
+                    is_seeded=False,
+                    was_modified=True,
+                    error_message=None,
+                    audio_tracks=audio_tracks,
+                    subtitle_tracks=subtitle_tracks,
+                    selected_audio_track=selection.audio_track_index,
+                    selected_subtitle_track=selection.subtitle_track_index,
+                    audio_language_code=selection.audio_language_code,
+                    subtitle_language_code=selection.subtitle_language_code,
+                    was_compliant=False,
+                    skip_reason=None
+                ))
+                
                 if selection.should_change_audio:
                     logging.info("Updated: set default audio to Japanese and ensured default subtitles (%s): %s", selection.subtitle_language_code or "auto", effective_path)
                 else:
                     logging.info("Updated: ensured default subtitles (%s) when no Japanese audio present: %s", selection.subtitle_language_code or "auto", effective_path)
+                    
             except subprocess.CalledProcessError as e:
                 errors += 1
                 logging.warning("Command failed for %s: %s", effective_path, e)
+                
+                # Create report for file with error
+                file_reports.append(FileReport(
+                    file_path=path,
+                    series_title=title,
+                    episode_title=ep.get("title", "Unknown"),
+                    file_size=size or 0,
+                    is_seeded=False,
+                    was_modified=False,
+                    error_message=f"Command failed: {e}",
+                    audio_tracks=[],
+                    subtitle_tracks=[],
+                    selected_audio_track=None,
+                    selected_subtitle_track=None,
+                    audio_language_code=None,
+                    subtitle_language_code=None,
+                    was_compliant=False,
+                    skip_reason="Command execution failed"
+                ))
+                
             except Exception as e:
                 errors += 1
                 logging.warning("Failed processing %s: %s", effective_path, e)
+                
+                # Create report for file with error
+                file_reports.append(FileReport(
+                    file_path=path,
+                    series_title=title,
+                    episode_title=ep.get("title", "Unknown"),
+                    file_size=size or 0,
+                    is_seeded=False,
+                    was_modified=False,
+                    error_message=f"Processing failed: {e}",
+                    audio_tracks=[],
+                    subtitle_tracks=[],
+                    selected_audio_track=None,
+                    selected_subtitle_track=None,
+                    audio_language_code=None,
+                    subtitle_language_code=None,
+                    was_compliant=False,
+                    skip_reason="General processing error"
+                ))
+
+    # Generate report if enabled
+    if generate_reports:
+        logging.info("Generating detailed report...")
+        generate_report(file_reports, report_directory)
+        logging.info("Report generation completed")
 
     logging.info(
         "Done. Considered=%d, Modified=%d, SkippedSeeding=%d, Errors=%d",
